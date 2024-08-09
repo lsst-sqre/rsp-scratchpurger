@@ -1,0 +1,9 @@
+-c main.txt
+
+# Type checking
+mypy
+
+# Testing
+pytest
+pytest-cov
+
