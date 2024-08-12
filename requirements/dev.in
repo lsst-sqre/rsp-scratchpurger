@@ -2,8 +2,13 @@
 
 # Type checking
 mypy
+types-pyyaml
+
+# Linting
+ruff
+pre-commit
 
 # Testing
 pytest
+pytest-asyncio
 pytest-cov
-

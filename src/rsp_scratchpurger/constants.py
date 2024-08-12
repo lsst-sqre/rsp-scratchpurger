@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
-ENV_PREFIX="RSP_SCRATCHPURGER_"
-POLICY_FILE=Path("/etc/purger/config.yaml")
-
+CONFIG_FILE = Path("/etc/purger/config.yaml")
+ENV_PREFIX = "RSP_SCRATCHPURGER_"
+POLICY_FILE = Path("/etc/purger/policy.yaml")
+ROOT_LOGGER = "rsp_scratchpurger"
