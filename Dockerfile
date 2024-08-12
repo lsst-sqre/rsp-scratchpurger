@@ -11,10 +11,13 @@
 #   environment is the only thing copied into the runtime image.
 # runtime-image
 #   - Copies the virtual environment into place.
-#   - Runs a non-root user.
-#   - Sets up the entrypoint and port.
+#   - Sets up the entrypoint.
+#
+# Note that the scratchpurger will typically run as root, because its job
+#  is to use its privilege to clean up after people who did not clean up
+#  after themselves.
 
-FROM python:3.12.1-slim-bullseye as base-image
+FROM python:3.12.5-slim-bookworm as base-image
 
 # Update system packages
 COPY scripts/install-base-packages.sh .
@@ -33,31 +36,25 @@ RUN python -m venv $VIRTUAL_ENV
 # Make sure we use the virtualenv.
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
-# Put the latest pip and setuptools in the virtualenv.
-RUN pip install --upgrade --no-cache-dir pip setuptools wheel
+# Put the latest uv in the virtualenv.
+RUN pip install --upgrade --no-cache-dir uv
 
 # Install the app's Python runtime dependencies.
 COPY requirements/main.txt ./requirements.txt
-RUN pip install --quiet --no-cache-dir -r requirements.txt
+RUN uv pip install --quiet --no-cache-dir -r requirements.txt
 
 # Install the Python package.
 COPY . /workdir
 WORKDIR /workdir
-RUN pip install --no-cache-dir .
+RUN uv pip install --no-cache-dir .
 
 FROM base-image AS runtime-image
-
-# Create a non-root user.
-RUN useradd --create-home appuser
 
 # Copy the virtualenv.
 COPY --from=install-image /opt/venv /opt/venv
 
 # Make sure we use the virtualenv.
 ENV PATH="/opt/venv/bin:$PATH"
-
-# Switch to the non-root user.
-USER appuser
 
 # Run something innocuous
 CMD ["/bin/true"]

@@ -1,8 +1,40 @@
-"""Test the CLI."""
+"""Test that CLI works."""
 
 import subprocess
+from pathlib import Path
+
+import pytest
+from rsp_scratchpurger.models.config import Config
 
 
-def test_backup_cli() -> None:
-    cp = subprocess.run("purge_backups", check=False)
-    assert cp.returncode == 2    # It won't have the arguments
+def test_report(fake_root: Path, purger_config: Config) -> None:
+    config_file = fake_root / "config.yaml"
+    proc = subprocess.run(["rsp_report", "-c", str(config_file)], check=False)
+    assert proc.returncode == 0
+
+
+def test_purge(fake_root: Path, purger_config: Config) -> None:
+    config_file = fake_root / "config.yaml"
+    proc = subprocess.run(["rsp_purge", "-c", str(config_file)], check=False)
+    assert proc.returncode == 0
+
+
+def test_bad_config_file() -> None:
+    proc = subprocess.run(
+        ["rsp_report", "-c", "/this/file/does/not/exist"], check=False
+    )
+    assert proc.returncode != 0
+
+
+def test_bad_policy_file() -> None:
+    proc = subprocess.run(["rsp_purge"], check=False)
+    assert proc.returncode != 0
+
+
+def test_env_config(
+    fake_root: Path, purger_config: Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_file = fake_root / "config.yaml"
+    monkeypatch.setenv("RSP_SCRATCHPURGER_CONFIG_FILE", str(config_file))
+    proc = subprocess.run(["rsp_report"], check=False)
+    assert proc.returncode == 0

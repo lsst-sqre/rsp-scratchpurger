@@ -22,7 +22,8 @@ dependencies = []
 dynamic = ["version"]
 
 [project.scripts]
-purge_backups = "rsp_scratchpurger.cli:purge"
+rsp_purge = "rsp_scratchpurger.cli:purge"
+rsp_report = "rsp_scratchpurger.cli:report"
 
 [project.urls]
 Homepage = "https://phalanx.lsst.io"
