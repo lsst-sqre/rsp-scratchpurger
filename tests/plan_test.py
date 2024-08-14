@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from rsp_scratchpurger.exceptions import NotLockedError
 from rsp_scratchpurger.models.config import Config
 from rsp_scratchpurger.models.plan import FileReason
 from rsp_scratchpurger.purger import Purger
@@ -96,3 +97,10 @@ async def test_subdir(purger_config: Config, fake_root: Path) -> None:
     assert len(purger._plan.files) == 1
     assert purger._plan.files[0].path.parent.name == "foobar"
     assert purger._plan.files[0].path.name == "large"
+
+
+@pytest.mark.asyncio
+async def test_no_lock(purger_config: Config) -> None:
+    purger = Purger(config=purger_config)
+    with pytest.raises(NotLockedError):
+        await purger._perform_plan()

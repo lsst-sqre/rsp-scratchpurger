@@ -17,7 +17,7 @@
 #  is to use its privilege to clean up after people who did not clean up
 #  after themselves.
 
-FROM python:3.12.5-slim-bookworm as base-image
+FROM python:3.12.5-slim-bookworm AS base-image
 
 # Update system packages
 COPY scripts/install-base-packages.sh .
