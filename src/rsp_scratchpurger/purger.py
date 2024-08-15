@@ -11,6 +11,7 @@ import structlog
 import yaml
 from safir.logging import Profile, configure_logging
 from safir.slack.blockkit import SlackTextBlock
+from safir.slack.webhook import SlackRouteErrorHandler
 
 from .constants import ROOT_LOGGER
 from .exceptions import NotLockedError, PlanNotReadyError
@@ -36,6 +37,11 @@ class Purger:
             )
         else:
             self._logger = logger
+        if self._config.alert_hook:
+            SlackRouteErrorHandler.initialize(
+                str(self._config.alert_hook), ROOT_LOGGER, self._logger
+            )
+            self._logger.debug("Slack webhook initialized")
         self._logger.debug("Purger initialized")
         # Anything that uses the plan should acquire the lock before
         # proceeding.

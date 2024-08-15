@@ -6,10 +6,10 @@ import os
 from pathlib import Path
 
 import yaml
-from pydantic import ValidationError
+from pydantic import HttpUrl, ValidationError
 from safir.logging import LogLevel, Profile
 
-from .constants import ENV_PREFIX
+from .constants import CONFIG_FILE, ENV_PREFIX
 from .models.config import Config
 from .models.v1.policy import Policy
 from .purger import Purger
@@ -46,14 +46,13 @@ def _postprocess_args_to_config(raw_args: argparse.Namespace) -> Config:
     override_cf = raw_args.config_file or os.getenv(
         ENV_PREFIX + "CONFIG_FILE", ""
     )
-    if override_cf:
-        config_file = Path(override_cf)
-        try:
-            config_obj = yaml.safe_load(config_file.read_text())
-            config = Config.model_validate(config_obj)
-        except (FileNotFoundError, UnicodeDecodeError, ValidationError):
-            config = Config()
-    else:
+    config_file = Path(override_cf) if override_cf else Path(CONFIG_FILE)
+    try:
+        config_obj = yaml.safe_load(config_file.read_text())
+        config = Config.model_validate(config_obj)
+    except (FileNotFoundError, UnicodeDecodeError, ValidationError):
+        # If the file is not there, or readable, or parseable, just
+        # start with an empty config and add our command-line options.
         config = Config()
     # Validate policy.  If the file is specified, use that; if not, use
     # defaults from config.
@@ -78,6 +77,13 @@ def _postprocess_args_to_config(raw_args: argparse.Namespace) -> Config:
             config.logging.profile = Profile.production
     if raw_args.dry_run is not None:
         config.dry_run = raw_args.dry_run
+    # Add the Slack alert hook, if we have it.  We should not set this in the
+    # config YAML, or the command line, because it's a secret.
+    # It ends up getting injected into the environment (which isn't much
+    # better) via a K8s secret.
+    hook = os.getenv(ENV_PREFIX + "ALERT_HOOK", "")
+    if hook:
+        config.alert_hook = HttpUrl(url=hook)
     return config
 
 
