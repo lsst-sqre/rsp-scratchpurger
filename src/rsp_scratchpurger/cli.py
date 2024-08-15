@@ -9,8 +9,8 @@ import yaml
 from pydantic import HttpUrl, ValidationError
 from safir.logging import LogLevel, Profile
 
+from .config import Config
 from .constants import CONFIG_FILE, ENV_PREFIX
-from .models.config import Config
 from .models.v1.policy import Policy
 from .purger import Purger
 
@@ -50,9 +50,13 @@ def _postprocess_args_to_config(raw_args: argparse.Namespace) -> Config:
     try:
         config_obj = yaml.safe_load(config_file.read_text())
         config = Config.model_validate(config_obj)
-    except (FileNotFoundError, UnicodeDecodeError, ValidationError):
+    except (FileNotFoundError, UnicodeDecodeError, ValidationError) as exc:
         # If the file is not there, or readable, or parseable, just
         # start with an empty config and add our command-line options.
+        #
+        # But also complain.  We don't have a logger yet, so shout to stdout
+        # instead.
+        print(f"Could not load config '{config_file!s}': {exc}")  # noqa:T201
         config = Config()
     # Validate policy.  If the file is specified, use that; if not, use
     # defaults from config.
@@ -64,19 +68,21 @@ def _postprocess_args_to_config(raw_args: argparse.Namespace) -> Config:
     Policy.model_validate(policy_obj)
     # If we get this far, it's a legal policy file.
     config.policy_file = policy_file
+
     # For dry-run and debug, if specified, use that, and if not, do whatever
     # the config says.
-    if raw_args.debug is not None:
-        if raw_args.debug:
-            config.logging.log_level = LogLevel.DEBUG
-            config.logging.profile = Profile.development
-        else:
-            # User asked for no debug, so let's override the config.
-            # I guess?
-            config.logging.log_level = LogLevel.INFO
-            config.logging.profile = Profile.production
-    if raw_args.dry_run is not None:
-        config.dry_run = raw_args.dry_run
+    override_debug = raw_args.debug or bool(
+        os.getenv(ENV_PREFIX + "DEBUG", "")
+    )
+    if override_debug:
+        config.logging.log_level = LogLevel.DEBUG
+        config.logging.profile = Profile.development
+    override_dry_run = raw_args.dry_run or bool(
+        os.getenv(ENV_PREFIX + "DRY_RUN", None)
+    )
+    if override_dry_run:
+        config.dry_run = True
+
     # Add the Slack alert hook, if we have it.  We should not set this in the
     # config YAML, or the command line, because it's a secret.
     # It ends up getting injected into the environment (which isn't much

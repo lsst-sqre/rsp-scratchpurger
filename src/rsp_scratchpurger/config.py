@@ -7,7 +7,7 @@ from pydantic import Field, HttpUrl
 from safir.logging import LogLevel, Profile
 from safir.pydantic import CamelCaseModel
 
-from ..constants import ENV_PREFIX, POLICY_FILE
+from .constants import ENV_PREFIX, POLICY_FILE
 
 
 class LoggingConfig(CamelCaseModel):

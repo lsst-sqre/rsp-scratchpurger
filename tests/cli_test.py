@@ -4,7 +4,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from rsp_scratchpurger.models.config import Config
+from rsp_scratchpurger.config import Config
 
 
 def test_report(fake_root: Path, purger_config: Config) -> None:

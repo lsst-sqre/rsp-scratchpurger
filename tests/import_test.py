@@ -1,6 +1,6 @@
 """Test basic module functionality."""
 import rsp_scratchpurger
-from rsp_scratchpurger.models.config import Config
+from rsp_scratchpurger.config import Config
 
 
 def test_import(purger_config: Config) -> None:

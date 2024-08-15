@@ -13,9 +13,9 @@ from safir.logging import Profile, configure_logging
 from safir.slack.blockkit import SlackTextBlock
 from safir.slack.webhook import SlackRouteErrorHandler
 
+from .config import Config
 from .constants import ROOT_LOGGER
 from .exceptions import NotLockedError, PlanNotReadyError
-from .models.config import Config
 from .models.plan import FileClass, FileReason, FileRecord, Plan
 from .models.v1.policy import DirectoryPolicy, Policy
 
@@ -42,7 +42,10 @@ class Purger:
                 str(self._config.alert_hook), ROOT_LOGGER, self._logger
             )
             self._logger.debug("Slack webhook initialized")
-        self._logger.debug("Purger initialized")
+        cfgdict = self._config.to_dict()
+        if "alert_hook" in cfgdict:
+            cfgdict["alert_hook"] = "<SECRET>"
+        self._logger.info("Purger initialized", config=cfgdict)
         # Anything that uses the plan should acquire the lock before
         # proceeding.
         self._lock = asyncio.Lock()
