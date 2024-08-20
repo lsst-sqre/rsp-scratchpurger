@@ -7,6 +7,9 @@ from typing import Annotated, TypeAlias
 from pydantic import BeforeValidator, Field
 from safir.pydantic import CamelCaseModel, HumanTimedelta
 
+# HumanSizeBytes should eventually go into safir.pydantic next to
+# HumanTimedelta.
+
 
 @dataclass
 class MantissaAndMultiplier:
@@ -150,7 +153,6 @@ class Intervals(CamelCaseModel):
                 self.creation_interval.total_seconds()
             )
         if self.modification_interval is not None:
-            # The things we do for linters.
             ret["modification_interval"] = int(
                 self.modification_interval.total_seconds()
             )
@@ -206,6 +208,13 @@ class Policy(CamelCaseModel):
     def get_directories(self) -> list[Path]:
         """Return list of directories specified in this policy, sorted by
         length, shortest first.
+
+        The sort order is important so that we can start with most-specific
+        and work our way to least-specific.  This is also the way
+        ingress-nginx sorts its ingresses, and it seems to work fine there.
+
+        When traversing the list, we just pop() off the end and work our way
+        back.
         """
         return sorted(
             [x.path for x in self.directories], key=lambda x: len(str(x))

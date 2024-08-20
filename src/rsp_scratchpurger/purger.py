@@ -9,12 +9,13 @@ from pathlib import Path
 
 import structlog
 import yaml
-from safir.logging import configure_logging
+from safir.logging import Profile, configure_logging
 from safir.slack.blockkit import SlackTextBlock
+from safir.slack.webhook import SlackRouteErrorHandler
 
+from .config import Config
 from .constants import ROOT_LOGGER
-from .exceptions import PlanNotReadyError, PolicyNotFoundError
-from .models.config import Config
+from .exceptions import NotLockedError, PlanNotReadyError
 from .models.plan import FileClass, FileReason, FileRecord, Plan
 from .models.v1.policy import DirectoryPolicy, Policy
 
@@ -36,7 +37,17 @@ class Purger:
             )
         else:
             self._logger = logger
-        self._logger.debug("Purger initialized")
+        if self._config.alert_hook:
+            SlackRouteErrorHandler.initialize(
+                str(self._config.alert_hook), ROOT_LOGGER, self._logger
+            )
+            self._logger.debug("Slack webhook initialized")
+        cfgdict = self._config.to_dict()
+        if "alert_hook" in cfgdict:
+            cfgdict["alert_hook"] = "<SECRET>"
+        self._logger.info("Purger initialized", config=cfgdict)
+        # Anything that uses the plan should acquire the lock before
+        # proceeding.
         self._lock = asyncio.Lock()
         self._plan: Plan | None = None
 
@@ -52,55 +63,65 @@ class Purger:
         self._logger.debug("Attempting to acquire lock for plan()")
         async with self._lock:
             self._logger.debug("Lock for plan() acquired.")
+            await self._perform_plan()
 
-            self._logger.debug(
-                f"Reloading policy from {self._config.policy_file}"
+    async def _perform_plan(self) -> None:
+        # This does the actual work.
+        # We split it so we can do a do-it-all run under a single lock.
+        if not self._lock.locked():
+            raise NotLockedError("Cannot plan: do not have lock")
+
+        self._logger.debug(f"Reloading policy from {self._config.policy_file}")
+        policy_doc = yaml.safe_load(self._config.policy_file.read_text())
+        policy = Policy.model_validate(policy_doc)
+
+        # Invalidate any current plan
+        self._plan = None
+
+        directories = policy.get_directories()
+
+        visited: list[Path] = []
+
+        # Set time at beginning of run
+        now = datetime.datetime.now(tz=datetime.UTC)
+        then = now
+        later = self._config.future_duration
+        if later:
+            self._logger.info(
+                f"Planning for time {later.total_seconds()}s from now."
             )
-            policy_doc = yaml.safe_load(self._config.policy_file.read_text())
-            policy = Policy.model_validate(policy_doc)
-
-            # Invalidate any current plan
-            self._plan = None
-
-            directories = policy.get_directories()
-
-            visited: list[Path] = []
-
-            # Set time at beginning of run
-            now = datetime.datetime.now(tz=datetime.UTC)
-            purge: list[FileRecord] = []
-            while directories:
-                # Take a directory (the longest remaining) off the end
-                # of the list, and consider it.
-                consider = directories.pop()
-                self._logger.debug(f"Considering {consider!s}")
-                for root, _, files in consider.walk():
-                    # Check whether this root has already been handled
-                    # by another, more specific policy.
-                    if self._check_visited(root, visited):
-                        self._logger.debug(
-                            f"Directory {root!s} already checked."
-                        )
-                        continue
-                    # Grab the policy.
-                    current_policy = self._get_directory_policy(
-                        path=root, policy=policy
+            then += later
+        purge: list[FileRecord] = []
+        while directories:
+            # Take a directory (the longest remaining) off the end
+            # of the list, and consider it.
+            consider = directories.pop()
+            self._logger.debug(f"Considering {consider!s}")
+            # Grab the policy.
+            current_policy = self._get_directory_policy(
+                path=consider, policy=policy
+            )
+            for root, _, files in consider.walk():
+                # Check whether this root has already been handled
+                # by another, more specific policy.
+                if self._check_visited(root, visited):
+                    self._logger.debug(f"Directory {root!s} already checked.")
+                    continue
+                # Check each file.
+                for file in files:
+                    purge_file = self._check_file(
+                        path=root / file, policy=current_policy, when=then
                     )
-                    # Check each file.
-                    for file in files:
-                        purge_file = self._check_file(
-                            path=root / file, policy=current_policy, when=now
+                    if purge_file is not None:
+                        self._logger.debug(
+                            f"Adding {purge_file} to purge list"
                         )
-                        if purge_file is not None:
-                            self._logger.debug(
-                                f"Adding {purge_file} to purge list"
-                            )
-                            purge.append(purge_file)
-                # OK, we're done with this tree.  Skip it when
-                # considering higher (shorter-named) directories.
-                visited.insert(0, consider)
+                        purge.append(purge_file)
+            # OK, we're done with this tree.  Skip it when
+            # considering higher (shorter-named) directories.
+            visited.insert(0, consider)
 
-            self._plan = Plan(files=purge)
+        self._plan = Plan(files=purge, directories=visited)
 
     def _get_directory_policy(
         self, path: Path, policy: Policy
@@ -108,7 +129,10 @@ class Purger:
         for d_policy in policy.directories:
             if d_policy.path == path:
                 return d_policy
-        raise PolicyNotFoundError(f"Policy for '{path}' not found")
+        # We don't raise a specific error because this should be a can't-
+        # happen kind of error: we only ever run _get_directory_policy from
+        # inside a loop over policy directories.
+        raise ValueError(f"Policy for '{path}' not found")
 
     def _check_visited(self, root: Path, visited: list[Path]) -> bool:
         return any(vis == root or vis in root.parents for vis in visited)
@@ -116,6 +140,12 @@ class Purger:
     def _check_file(
         self, path: Path, policy: DirectoryPolicy, when: datetime.datetime
     ) -> FileRecord | None:
+        # This is the actual meat of the purger.  We've found a file.
+        # Determine if it is large or small, and then compare its three
+        # times against our removal criteria.  If any of them match, mark
+        # it for deletion.
+        #
+        # If it is a match, return a FileRecord; if not, return None.
         self._logger.debug(f"Checking {path!s} against {policy} for {when}")
         st = path.stat()
         # Get large-or-small policy, depending.
@@ -137,41 +167,59 @@ class Purger:
         if a_max and (atime + a_max < when):
             self._logger.debug(f"atime: {path!s}")
             return FileRecord(
-                path=path, file_class=f_class, file_reason=FileReason.ATIME
+                path=path,
+                file_class=f_class,
+                file_reason=FileReason.ATIME,
+                file_interval=when - atime,
+                criterion_interval=a_max,
             )
         if c_max and (ctime + c_max < when):
             self._logger.debug(f"ctime: {path!s}")
             return FileRecord(
-                path=path, file_class=f_class, file_reason=FileReason.CTIME
+                path=path,
+                file_class=f_class,
+                file_reason=FileReason.CTIME,
+                file_interval=when - ctime,
+                criterion_interval=c_max,
             )
         if m_max and (mtime + m_max < when):
             self._logger.debug(f"mtime: {path!s}")
             return FileRecord(
-                path=path, file_class=f_class, file_reason=FileReason.MTIME
+                path=path,
+                file_class=f_class,
+                file_reason=FileReason.MTIME,
+                file_interval=when - mtime,
+                criterion_interval=m_max,
             )
         return None
 
     async def report(self) -> None:
         """Report what directories are to be purged."""
-        if self._plan is None:
-            raise PlanNotReadyError("Cannot report: plan not ready")
         self._logger.debug("Awaiting lock for report()")
         async with self._lock:
             self._logger.debug("Acquired lock for report()")
-            if self._config.alert_hook is not None:
-                rpt_text = [
-                    f"{x.path!s}: {x.file_reason}" for x in self._plan.files
-                ]
-                if len(rpt_text) == 0:
-                    rpt_text = ["No files to be purged"]
-                rpt_msg = SlackTextBlock(
-                    heading="Purge plan",
-                    text="\n".join(rpt_text),  # May be truncated
-                )
-                self._logger.info(rpt_msg)
-            else:
-                # Just log the plan.
-                self._logger.info({"plan": self._plan})
+            await self._perform_report()
+
+    async def _perform_report(self) -> None:
+        # This does the actual work.
+        # We split it so we can do a do-it-all run under a single lock.
+        if not self._lock.locked():
+            raise NotLockedError("Cannot report: do not have lock")
+        if self._plan is None:
+            raise PlanNotReadyError("Cannot report: plan not ready")
+        rpt_text = str(self._plan)
+        if self._config.alert_hook is not None:
+            rpt_msg = SlackTextBlock(
+                heading="Purge plan",
+                text=rpt_text,  # May be truncated
+            )
+            self._logger.info(rpt_msg)
+        elif self._config.logging.profile == Profile.production:
+            # Just log the plan.
+            self._logger.info({"plan": self._plan})
+        else:
+            # Log the human-friendly plan.
+            self._logger.info(rpt_text)
 
     async def purge(self) -> None:
         """Purge files and after-purge-empty directories."""
@@ -181,24 +229,59 @@ class Purger:
             )
             await self.report()
             return
-        if self._plan is None:
-            raise PlanNotReadyError("Cannot purge: plan not ready")
+        if self._config.future_duration:
+            self._logger.warning(
+                "Cannot purge because future_duration is set; reporting"
+                " instead"
+            )
+            await self.report()
+            return
         self._logger.debug("Awaiting lock for purge()")
         async with self._lock:
             self._logger.debug("Acquired lock for purge()")
-            victim_dirs: set[Path] = set()
-            for purge_file in self._plan.files:
-                path = purge_file.path
-                self._logger.debug(f"Removing {path!s}")
-                path.unlink()
-                victim_dirs.add(path.parent)
-            self._logger.debug("File purge complete; removing empty dirs")
-            vd_l = sorted(
-                list(victim_dirs), key=lambda x: len(str(x)), reverse=True
-            )
-            for victim in vd_l:
-                if len(list(victim.glob("*"))) == 0:
-                    self._logger.debug(f"Removing directory {victim!s}")
-                    victim.rmdir()
-            self._logger.debug("Purge complete")
-            self._plan = None
+            await self._perform_purge()
+
+    async def _perform_purge(self) -> None:
+        # This does the actual work.
+        # We split it so we can do a do-it-all run under a single lock.
+        if not self._lock.locked():
+            raise NotLockedError("Cannot purge: do not have lock")
+        if self._plan is None:
+            raise PlanNotReadyError("Cannot purge: plan not ready")
+        victim_dirs: set[Path] = set()
+        for purge_file in self._plan.files:
+            path = purge_file.path
+            self._logger.debug(f"Removing {path!s}")
+            path.unlink()
+            victim_dirs.add(path.parent)
+        self._logger.debug("File purge complete; removing empty dirs")
+        vd_l = sorted(
+            list(victim_dirs), key=lambda x: len(str(x)), reverse=True
+        )
+        for victim in vd_l:
+            if victim in self._plan.directories:
+                self._logger.debug(
+                    f"Won't remove directory {victim!s} named"
+                    " directly in policy"
+                )
+                continue
+            if len(list(victim.glob("*"))) == 0:
+                self._logger.debug(f"Removing directory {victim!s}")
+                victim.rmdir()
+        self._logger.debug("Purge complete")
+        # We've acted on the plan, so it is no longer valid.  We must
+        # rerun plan() before running purge() or report() again.
+        self._plan = None
+
+    async def execute(self) -> None:
+        """Create a plan, report it, and immediately execute it.
+
+        This is the do-it-all method and will be the usual entrypoint for
+        actual use.
+        """
+        self._logger.debug("Awaiting lock for execute()")
+        async with self._lock:
+            self._logger.debug("Acquired lock for execute()")
+            await self._perform_plan()
+            await self._perform_report()
+            await self._perform_purge()

@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 
 import pytest
 import yaml
-from rsp_scratchpurger.models.config import Config
+from rsp_scratchpurger.config import Config
 from rsp_scratchpurger.models.v1.policy import Policy
 
 

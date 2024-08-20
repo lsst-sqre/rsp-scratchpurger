@@ -2,8 +2,8 @@
 
 
 import pytest
+from rsp_scratchpurger.config import Config
 from rsp_scratchpurger.exceptions import PlanNotReadyError
-from rsp_scratchpurger.models.config import Config
 from rsp_scratchpurger.purger import Purger
 
 
