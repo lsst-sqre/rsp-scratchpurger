@@ -7,6 +7,7 @@ from pathlib import Path
 
 import yaml
 from pydantic import HttpUrl, ValidationError
+from safir.datetime import parse_timedelta
 from safir.logging import LogLevel, Profile
 
 from .config import Config
@@ -36,6 +37,20 @@ def _add_args(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         help="Do not act, but report what would be done",
+    )
+
+    return parser
+
+
+def _add_future_time(
+    parser: argparse.ArgumentParser,
+) -> argparse.ArgumentParser:
+    parser.add_argument(
+        "-t",
+        "--future_duration",
+        "--time",
+        "--future-time",
+        help="Duration from now to future time to build a plan for",
     )
 
     return parser
@@ -83,6 +98,15 @@ def _postprocess_args_to_config(raw_args: argparse.Namespace) -> Config:
     if override_dry_run:
         config.dry_run = True
 
+    # Add the time-into-the-future (used for warning only)
+    override_future_duration = (
+        "future_duration" in raw_args and raw_args.future_duration
+    ) or os.getenv(ENV_PREFIX + "FUTURE_DURATION", None)
+    if override_future_duration:
+        later = parse_timedelta(override_future_duration)
+        if later:
+            config.future_duration = later
+
     # Add the Slack alert hook, if we have it.  We should not set this in the
     # config YAML, or the command line, because it's a secret.
     # It ends up getting injected into the environment (which isn't much
@@ -96,6 +120,15 @@ def _postprocess_args_to_config(raw_args: argparse.Namespace) -> Config:
 def _get_executor(desc: str) -> Purger:
     parser = argparse.ArgumentParser(description=desc)
     parser = _add_args(parser)
+    args = parser.parse_args()
+    config = _postprocess_args_to_config(args)
+    return Purger(config=config)
+
+
+def _get_warner(desc: str) -> Purger:
+    parser = argparse.ArgumentParser(description=desc)
+    parser = _add_args(parser)
+    parser = _add_future_time(parser)
     args = parser.parse_args()
     config = _postprocess_args_to_config(args)
     return Purger(config=config)
@@ -119,3 +152,12 @@ def execute() -> None:
     """Make a plan, report, and purge files."""
     purger = _get_executor("Report and purge files.")
     asyncio.run(purger.execute())
+
+
+def warn() -> None:
+    """Make a plan for some time in the future, and report as if it were
+    that time.
+    """
+    warner = _get_warner("Make a plan for a future time and report it.")
+    asyncio.run(warner.plan())
+    asyncio.run(warner.report())

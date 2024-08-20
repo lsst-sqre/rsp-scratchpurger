@@ -84,6 +84,13 @@ class Purger:
 
         # Set time at beginning of run
         now = datetime.datetime.now(tz=datetime.UTC)
+        then = now
+        later = self._config.future_duration
+        if later:
+            self._logger.info(
+                f"Planning for time {later.total_seconds()}s from now."
+            )
+            then += later
         purge: list[FileRecord] = []
         while directories:
             # Take a directory (the longest remaining) off the end
@@ -103,7 +110,7 @@ class Purger:
                 # Check each file.
                 for file in files:
                     purge_file = self._check_file(
-                        path=root / file, policy=current_policy, when=now
+                        path=root / file, policy=current_policy, when=then
                     )
                     if purge_file is not None:
                         self._logger.debug(
@@ -219,6 +226,13 @@ class Purger:
         if self._config.dry_run:
             self._logger.warning(
                 "Cannot purge because dry_run enabled; reporting instead"
+            )
+            await self.report()
+            return
+        if self._config.future_duration:
+            self._logger.warning(
+                "Cannot purge because future_duration is set; reporting"
+                " instead"
             )
             await self.report()
             return

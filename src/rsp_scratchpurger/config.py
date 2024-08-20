@@ -5,7 +5,7 @@ from typing import Annotated
 
 from pydantic import Field, HttpUrl
 from safir.logging import LogLevel, Profile
-from safir.pydantic import CamelCaseModel
+from safir.pydantic import CamelCaseModel, HumanTimedelta
 
 from .constants import ENV_PREFIX, POLICY_FILE
 
@@ -61,6 +61,14 @@ class Config(CamelCaseModel):
         ),
     ] = False
 
+    future_duration: Annotated[
+        HumanTimedelta | None,
+        Field(
+            title="Duration into the future to use for planning purposes",
+            validation_alias=ENV_PREFIX + "FUTURE_DURATION",
+        ),
+    ] = None
+
     logging: Annotated[
         LoggingConfig,
         Field(
@@ -88,4 +96,7 @@ class Config(CamelCaseModel):
         }
         if self.alert_hook:
             obj["alert_hook"] = str(self.alert_hook)
+        if self.future_duration:
+            secs = int(self.future_duration.total_seconds())
+            obj["future_duration"] = f"{secs}s"
         return obj

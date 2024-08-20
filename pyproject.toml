@@ -24,6 +24,7 @@ dynamic = ["version"]
 [project.scripts]
 rsp_purge = "rsp_scratchpurger.cli:purge"
 rsp_report = "rsp_scratchpurger.cli:report"
+rsp_warn = "rsp_scratchpurger.cli:warn"
 rsp_execute = "rsp_scratchpurger.cli:execute"
 
 [project.urls]
