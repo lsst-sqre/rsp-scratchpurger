@@ -4,7 +4,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from rsp_scratchpurger.models.config import Config
+from rsp_scratchpurger.config import Config
 
 
 def test_report(fake_root: Path, purger_config: Config) -> None:
@@ -16,6 +16,12 @@ def test_report(fake_root: Path, purger_config: Config) -> None:
 def test_purge(fake_root: Path, purger_config: Config) -> None:
     config_file = fake_root / "config.yaml"
     proc = subprocess.run(["rsp_purge", "-c", str(config_file)], check=False)
+    assert proc.returncode == 0
+
+
+def test_execute(fake_root: Path, purger_config: Config) -> None:
+    config_file = fake_root / "config.yaml"
+    proc = subprocess.run(["rsp_execute", "-c", str(config_file)], check=False)
     assert proc.returncode == 0
 
 

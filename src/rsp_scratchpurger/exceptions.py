@@ -7,5 +7,5 @@ class PlanNotReadyError(SlackException):
     """An operation needing a Plan was requested, but no Plan is ready."""
 
 
-class PolicyNotFoundError(SlackException):
-    """No Policy matching the given directory was found."""
+class NotLockedError(SlackException):
+    """An operation requiring a lock was requested with no lock held."""
