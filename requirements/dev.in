@@ -15,3 +15,6 @@ pre-commit
 pytest
 pytest-asyncio
 pytest-cov
+
+# Changelog mgt
+scriv
