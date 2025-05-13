@@ -146,8 +146,20 @@ class Purger:
         # it for deletion.
         #
         # If it is a match, return a FileRecord; if not, return None.
+        #
+        # If it is a symlink, ignore it.  If it's a link to an actual file
+        # managed by our policy, we'll get to it there, and if it isn't,
+        # we shouldn't do anything about it.  It's only going to be a handful
+        # of bytes in any event.
+        if path.is_symlink():
+            self._logger.debug(f"{path!s} is a symbolic link; skipping")
+            return None
         self._logger.debug(f"Checking {path!s} against {policy} for {when}")
-        st = path.stat()
+        try:
+            st = path.stat()
+        except FileNotFoundError as exc:
+            self._logger.warning(f"{path!s} not found: {exc!s}; skipping")
+            return None
         # Get large-or-small policy, depending.
         size = st.st_size
         if size >= policy.threshold:

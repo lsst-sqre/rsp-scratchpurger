@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 
 from rsp_scratchpurger.models.plan import FileReason
-from safir.pydantic import _validate_human_timedelta
+from safir.pydantic._types import _validate_human_timedelta
 
 
 def set_age(path: Path, whichtime: FileReason, h_age: str) -> None:
