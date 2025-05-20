@@ -256,6 +256,7 @@ class Purger:
     async def _perform_purge(self) -> None:
         # This does the actual work.
         # We split it so we can do a do-it-all run under a single lock.
+        failures: list[Exception] = []
         if not self._lock.locked():
             raise NotLockedError("Cannot purge: do not have lock")
         if self._plan is None:
@@ -264,7 +265,13 @@ class Purger:
         for purge_file in self._plan.files:
             path = purge_file.path
             self._logger.debug(f"Removing {path!s}")
-            path.unlink()
+            try:
+                path.unlink()
+            except (PermissionError, FileNotFoundError) as exc:
+                self._logger.warning(
+                    f"Failed to remove file '{path!s}': {exc!s}"
+                )
+                failures.append(exc)
             victim_dirs.add(path.parent)
         self._logger.debug("File purge complete; removing empty dirs")
         vd_l = sorted(
@@ -279,8 +286,18 @@ class Purger:
                 continue
             if len(list(victim.glob("*"))) == 0:
                 self._logger.debug(f"Removing directory {victim!s}")
-                victim.rmdir()
-        self._logger.debug("Purge complete")
+                try:
+                    victim.rmdir()
+                except (PermissionError, FileNotFoundError) as exc:
+                    self._logger.warning(
+                        f"Failed to remove directory '{path!s}': {exc!s}"
+                    )
+                    failures.append(exc)
+        if failures:
+            f_str = ", ".join([f"{x!s}" for x in failures])
+            self._logger.warning(f"Purge complete with errors: {f_str}")
+        else:
+            self._logger.debug("Purge complete")
         # We've acted on the plan, so it is no longer valid.  We must
         # rerun plan() before running purge() or report() again.
         self._plan = None
