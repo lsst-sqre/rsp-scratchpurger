@@ -149,7 +149,9 @@ class Purger:
         #
         # If it is a symlink, ignore it.  If it's a link to an actual file
         # managed by our policy, we'll get to it there, and if it isn't,
-        # we shouldn't do anything about it.  It's only going to be a handful
+        # we shouldn't do anything about it.  That will leave a dangling
+        # symlink and the directories leading down to it.  We might want to
+        # think about this sometime, but it's only going to be a handful
         # of bytes in any event.
         if path.is_symlink():
             self._logger.debug(f"{path!s} is a symbolic link; skipping")
@@ -160,6 +162,10 @@ class Purger:
         except FileNotFoundError as exc:
             self._logger.warning(f"{path!s} not found: {exc!s}; skipping")
             return None
+        except PermissionError as exc:
+            self._logger.warning(
+                f"Could not stat() '{path!s}': {exc!s}; skipping"
+            )
         # Get large-or-small policy, depending.
         size = st.st_size
         if size >= policy.threshold:
@@ -256,24 +262,30 @@ class Purger:
     async def _perform_purge(self) -> None:
         # This does the actual work.
         # We split it so we can do a do-it-all run under a single lock.
-        failures: list[Exception] = []
         if not self._lock.locked():
             raise NotLockedError("Cannot purge: do not have lock")
         if self._plan is None:
             raise PlanNotReadyError("Cannot purge: plan not ready")
         victim_dirs: set[Path] = set()
+        failed_files: dict[Path, Exception] = {}
         for purge_file in self._plan.files:
             path = purge_file.path
             self._logger.debug(f"Removing {path!s}")
             try:
                 path.unlink()
-            except (PermissionError, FileNotFoundError) as exc:
-                self._logger.warning(
-                    f"Failed to remove file '{path!s}': {exc!s}"
-                )
-                failures.append(exc)
+            except (FileNotFoundError, PermissionError) as exc:
+                failed_files[path] = exc
             victim_dirs.add(path.parent)
         self._logger.debug("File purge complete; removing empty dirs")
+        self._purge_victim_dirs(victim_dirs, failed_files)
+
+    def _purge_victim_dirs(
+        self, victim_dirs: set[Path], failed_files: dict[Path, Exception]
+    ) -> None:
+        if self._plan is None:
+            # This can't really happen, but mypy doesn't know that
+            return
+
         vd_l = sorted(
             list(victim_dirs), key=lambda x: len(str(x)), reverse=True
         )
@@ -288,14 +300,22 @@ class Purger:
                 self._logger.debug(f"Removing directory {victim!s}")
                 try:
                     victim.rmdir()
-                except (PermissionError, FileNotFoundError) as exc:
-                    self._logger.warning(
-                        f"Failed to remove directory '{path!s}': {exc!s}"
-                    )
-                    failures.append(exc)
-        if failures:
-            f_str = ", ".join([f"{x!s}" for x in failures])
-            self._logger.warning(f"Purge complete with errors: {f_str}")
+                except (FileNotFoundError, PermissionError) as exc:
+                    failed_files[victim] = exc
+        if failed_files:
+            if self._config.alert_hook is not None:
+                rpt_text = ", ".join(
+                    [f"{x!s}: {failed_files[x]!s}" for x in failed_files]
+                )
+                rpt_msg = SlackTextBlock(
+                    heading="Purge encountered errors",
+                    text=rpt_text,  # May be truncated
+                )
+                self._logger.warning(rpt_msg, failed_files=failed_files)
+            else:
+                self._logger.warning(
+                    "Purge encountered errors", failed_files=failed_files
+                )
         else:
             self._logger.debug("Purge complete")
         # We've acted on the plan, so it is no longer valid.  We must
