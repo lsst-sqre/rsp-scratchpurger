@@ -1,4 +1,11 @@
 
+<a id='changelog-0.1.1'></a>
+## 0.1.1 (2025-05-22)
+
+### Other changes
+
+- Harden against file deletion errors.
+
 <a id='changelog-0.1.0'></a>
 ## 0.1.0 (2025-05-13)
 
