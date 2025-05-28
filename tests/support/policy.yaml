@@ -10,7 +10,7 @@ directories:
         access_interval: 1h
         creation_interval: 24h
         modification_interval: 4h
-  - path: /scratch/foobar
+  - path: /scratch/foo/bar
     threshold: 20B
     intervals:
       large:

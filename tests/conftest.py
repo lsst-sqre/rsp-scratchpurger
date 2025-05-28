@@ -18,12 +18,12 @@ def fake_root() -> Iterator[Path]:
             "medium": "Hello, world!",
             "large": "The quick brown fox jumped over the lazy dog.",
         }
-        # Medium is "large" for "scratch" but "small" for "foobar".
+        # Medium is "large" for "scratch" but "small" for "scratch/foo/bar".
         tp = Path(td)
         scratch_dir = tp / "scratch"
-        foobar_dir = scratch_dir / "foobar"
-        foobar_dir.mkdir(parents=True)
-        for directory in (scratch_dir, foobar_dir):
+        foo_bar_dir = scratch_dir / "foo" / "bar"
+        foo_bar_dir.mkdir(parents=True)
+        for directory in (scratch_dir, foo_bar_dir):
             for sz in contents:
                 (directory / sz).write_text(contents[sz])
         yield tp
@@ -32,7 +32,7 @@ def fake_root() -> Iterator[Path]:
 @pytest.fixture
 def purger_config(fake_root: Path) -> Config:
     scratch_dir = fake_root / "scratch"
-    scratch_foobar = scratch_dir / "foobar"
+    scratch_foo_bar = scratch_dir / "foo" / "bar"
 
     # Load template policy file
     policy_file = Path(__file__).parent / "support" / "policy.yaml"
@@ -44,7 +44,7 @@ def purger_config(fake_root: Path) -> Config:
 
     # Change policy to point at fake root
     policy.directories[0].path = scratch_dir
-    policy.directories[1].path = scratch_foobar
+    policy.directories[1].path = scratch_foo_bar
 
     # Write out new policy document
     new_policy_dict = policy.to_dict()

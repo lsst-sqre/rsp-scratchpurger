@@ -90,12 +90,14 @@ async def test_null(fake_root: Path, purger_config: Config) -> None:
 
 @pytest.mark.asyncio
 async def test_subdir(purger_config: Config, fake_root: Path) -> None:
-    set_age(fake_root / "scratch" / "foobar" / "large", FileReason.ATIME, "8h")
+    set_age(
+        fake_root / "scratch" / "foo" / "bar" / "large", FileReason.ATIME, "8h"
+    )
     purger = Purger(config=purger_config)
     await purger.plan()
     assert purger._plan is not None
     assert len(purger._plan.files) == 1
-    assert purger._plan.files[0].path.parent.name == "foobar"
+    assert purger._plan.files[0].path.parent.name == "bar"
     assert purger._plan.files[0].path.name == "large"
 
 
