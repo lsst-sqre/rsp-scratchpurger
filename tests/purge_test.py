@@ -43,10 +43,10 @@ async def test_dry_run(purger_config: Config, fake_root: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_named_directory_not_removed(
+async def test_named_directory_and_parent_not_removed(
     purger_config: Config, fake_root: Path
 ) -> None:
-    # Rewrite policy to purge small files in `foobar`
+    # Rewrite policy to purge small files in `foo/bar`
     # Rewrite policy doc with shorter ctime
     policy_doc = yaml.safe_load(purger_config.policy_file.read_text())
     policy_doc["directories"][1]["intervals"]["small"] = {}
@@ -64,7 +64,9 @@ async def test_named_directory_not_removed(
 
     for fn in ("small", "medium", "large"):
         set_age(
-            fake_root / "scratch" / "foobar" / fn, FileReason.MTIME, "1000w"
+            fake_root / "scratch" / "foo" / "bar" / fn,
+            FileReason.MTIME,
+            "1000w",
         )
     purger_config.logging.log_level = LogLevel.DEBUG
     purger = Purger(config=purger_config)
@@ -72,19 +74,25 @@ async def test_named_directory_not_removed(
     assert purger._plan is not None
     assert len(purger._plan.files) == 3
     victim = purger._plan.files[0].path.parent
-    assert victim.name == "foobar"
+    parent = purger._plan.files[0].path.parent.parent
+    assert victim.name == "bar"
     assert victim.is_dir()
+    assert parent.name == "foo"
+    assert parent.is_dir()
     await purger.purge()
-    # It should not have been deleted, because it is named in a policy as
+    # Victim should not have been deleted, because it is named in a policy as
     # its own directory to check.
     assert victim.exists()
+    # Parent should not have been deleted, because it is the parent of a
+    # directory named in a policy.
+    assert parent.exists()
 
 
 @pytest.mark.asyncio
 async def test_directory_removed(
     purger_config: Config, fake_root: Path
 ) -> None:
-    # Rewrite policy to purge small files in `foobar`
+    # Rewrite policy to purge small files in `foo/bar`
     # Rewrite policy doc with shorter ctime
     policy_doc = yaml.safe_load(purger_config.policy_file.read_text())
     policy_doc["directories"][1]["intervals"]["small"] = {}
@@ -99,7 +107,7 @@ async def test_directory_removed(
     ] = "1s"
     new_policy = yaml.dump(policy_doc)
     purger_config.policy_file.write_text(new_policy)
-    victim = fake_root / "scratch" / "foobar" / "delete_me"
+    victim = fake_root / "scratch" / "foo" / "bar" / "delete_me"
     assert not victim.exists()
     victim.mkdir()
     assert victim.exists()
@@ -111,7 +119,7 @@ async def test_directory_removed(
     await purger.plan()
     assert purger._plan is not None
     await purger.purge()
-    # Both vfile and victim should be gone, but victim's parent ("foobar")
+    # Both vfile and victim should be gone, but victim's parent ("bar")
     # should still be there
     assert not vfile.exists()
     assert not victim.exists()

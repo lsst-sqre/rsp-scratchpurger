@@ -285,17 +285,12 @@ class Purger:
         if self._plan is None:
             # This can't really happen, but mypy doesn't know that
             return
-
+        plan_dirs = self._plan.directories
         vd_l = sorted(
             list(victim_dirs), key=lambda x: len(str(x)), reverse=True
         )
-        for victim in vd_l:
-            if victim in self._plan.directories:
-                self._logger.debug(
-                    f"Won't remove directory {victim!s} named"
-                    " directly in policy"
-                )
-                continue
+        victims = self._filter_victim_dirs(vd_l, plan_dirs)
+        for victim in victims:
             if len(list(victim.glob("*"))) == 0:
                 self._logger.debug(f"Removing directory {victim!s}")
                 try:
@@ -321,6 +316,30 @@ class Purger:
         # We've acted on the plan, so it is no longer valid.  We must
         # rerun plan() before running purge() or report() again.
         self._plan = None
+
+    def _filter_victim_dirs(
+        self, candidates: list[Path], plan_dirs: list[Path]
+    ) -> set[Path]:
+        victim_dirs: set[Path] = set()
+        parents: set[Path] = set()
+        for named in plan_dirs:
+            for p_dir in named.parents:
+                parents.add(p_dir)
+        for victim in candidates:
+            if victim in plan_dirs:
+                self._logger.debug(
+                    f"Won't remove directory {victim!s} named"
+                    " directly in policy"
+                )
+                continue
+            if victim in parents:
+                self._logger.debug(
+                    f"Won't remove directory {victim!s} because it is a"
+                    " parent of a directory named in policy"
+                )
+                continue
+            victim_dirs.add(victim)
+        return victim_dirs
 
     async def execute(self) -> None:
         """Create a plan, report it, and immediately execute it.
