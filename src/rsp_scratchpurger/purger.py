@@ -266,7 +266,6 @@ class Purger:
             raise NotLockedError("Cannot purge: do not have lock")
         if self._plan is None:
             raise PlanNotReadyError("Cannot purge: plan not ready")
-        victim_dirs: set[Path] = set()
         failed_files: dict[Path, Exception] = {}
         for purge_file in self._plan.files:
             path = purge_file.path
@@ -275,24 +274,29 @@ class Purger:
                 path.unlink()
             except (FileNotFoundError, PermissionError) as exc:
                 failed_files[path] = exc
-            victim_dirs.add(path.parent)
         self._logger.debug("File purge complete; removing empty dirs")
-        self._purge_victim_dirs(victim_dirs, failed_files)
+        self._tidy_victim_dirs(failed_files)
 
-    def _purge_victim_dirs(
-        self, victim_dirs: set[Path], failed_files: dict[Path, Exception]
-    ) -> None:
+    def _tidy_victim_dirs(self, failed_files: dict[Path, Exception]) -> None:
         if self._plan is None:
             # This can't really happen, but mypy doesn't know that
             return
         plan_dirs = self._plan.directories
-        vd_l = sorted(
-            list(victim_dirs), key=lambda x: len(str(x)), reverse=True
-        )
+        victim_dirs: list[Path] = []
+        for pdir in plan_dirs:
+            res = pdir.walk()
+            for thing in res:
+                dirpath = thing[0]
+                dirnames = thing[1]
+                victim_dirs.extend([(dirpath / x) for x in dirnames])
+        vd_l = sorted(victim_dirs, key=lambda x: len(str(x)), reverse=True)
         victims = self._filter_victim_dirs(vd_l, plan_dirs)
+        self._logger.debug(
+            f"Now-empty dirs to remove: {[str(x) for x in vd_l]}"
+        )
         for victim in victims:
             if len(list(victim.glob("*"))) == 0:
-                self._logger.debug(f"Removing directory {victim!s}")
+                self._logger.debug(f"Removing empty directory {victim!s}")
                 try:
                     victim.rmdir()
                 except (FileNotFoundError, PermissionError) as exc:
