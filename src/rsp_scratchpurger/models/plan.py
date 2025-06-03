@@ -84,5 +84,5 @@ class Plan(CamelCaseModel):
             rs += "No matching files found.\n"
         else:
             for sf in self.files:
-                rs += f"  {sf.path!s}\n"
+                rs += f"  -> {sf.path!s}\n"
         return rs
